@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Desibel Alarmı</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .alarm-active {
+      animation: pulse-ring 0.6s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center p-4">
+
+  <!-- Üst Başlık & Durum -->
+  <header class="w-full max-w-md flex justify-between items-center py-4 border-b border-slate-800 mb-6">
+    <div>
+      <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+        Desibel Alarmı
+      </h1>
+      <p class="text-xs text-slate-400">Mikrofon Eşik & Kalibrasyon</p>
+    </div>
+    <button id="btnShare" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+      Paylaş
+    </button>
+  </header>
+
+  <!-- Alarm Uyarısı Banner -->
+  <div id="alarmBanner" class="hidden w-full max-w-md bg-rose-600/90 text-white p-3 rounded-xl mb-4 text-center font-bold tracking-wide shadow-lg shadow-rose-950/50 animate-bounce">
+    EŞİK DEĞERİ AŞILDI!
+  </div>
+
+  <!-- Ana Gösterge -->
+  <main class="w-full max-w-md flex flex-col items-center">
+    
+    <div class="relative w-64 h-64 flex items-center justify-center mb-6">
+      <div id="gaugeBg" class="absolute inset-0 rounded-full border-4 border-slate-800 transition-all duration-300"></div>
+      <div id="gaugeRing" class="absolute inset-0 rounded-full border-4 border-emerald-500 transition-all duration-150"></div>
+      
+      <div class="text-center z-10 select-none">
+        <span id="dbValue" class="text-6xl font-black tracking-tighter text-white font-mono">--</span>
+        <span class="block text-sm font-medium text-slate-400 mt-1">dB (SPL Tahmini)</span>
+      </div>
+    </div>
+
+    <!-- Başlat / Durdur -->
+    <button id="btnToggle" class="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-emerald-500/20 mb-6">
+      Dinlemeyi Başlat
+    </button>
+
+    <!-- Kontrol Paneli / Ayarlar -->
+    <div class="w-full bg-slate-800/60 backdrop-blur border border-slate-800 rounded-2xl p-4 space-y-5">
+      
+      <!-- Eşik Ayarı -->
+      <div>
+        <div class="flex justify-between items-center mb-1 text-sm">
+          <span class="text-slate-300 font-medium">Alarm Eşiği</span>
+          <span id="thresholdVal" class="font-mono font-bold text-amber-400">75 dB</span>
+        </div>
+        <input id="rangeThreshold" type="range" min="30" max="110" value="75" class="w-full accent-amber-400 bg-slate-700 h-2 rounded-lg cursor-pointer">
+      </div>
+
+      <!-- Kalibrasyon & Skala -->
+      <div class="pt-3 border-t border-slate-700/60 space-y-4">
+        <div>
+          <div class="flex justify-between items-center mb-1 text-sm">
+            <span class="text-slate-300 font-medium">Kalibrasyon Ofseti</span>
+            <span id="offsetVal" class="font-mono text-cyan-400">0 dB</span>
+          </div>
+          <input id="rangeOffset" type="range" min="-30" max="30" value="0" class="w-full accent-cyan-400 bg-slate-700 h-2 rounded-lg cursor-pointer">
+          <p class="text-[11px] text-slate-400 mt-1">Mikrofon farkları için sabit ekleme/çıkarma.</p>
+        </div>
+
+        <div>
+          <div class="flex justify-between items-center mb-1 text-sm">
+            <span class="text-slate-300 font-medium">Skala Hassasiyet Çarpanı</span>
+            <span id="gainVal" class="font-mono text-cyan-400">1.0x</span>
+          </div>
+          <input id="rangeGain" type="range" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-cyan-400 bg-slate-700 h-2 rounded-lg cursor-pointer">
+          <p class="text-[11px] text-slate-400 mt-1">Giriş seviyesini oransal çarpanla genişletir.</p>
+        </div>
+
+        <!-- Sesli Uyarı Toggle -->
+        <div class="flex items-center justify-between pt-2">
+          <span class="text-sm text-slate-300">Sesli Uyarı (Bip)</span>
+          <input id="checkBeep" type="checkbox" checked class="w-5 h-5 accent-emerald-500 rounded cursor-pointer">
+        </div>
+      </div>
+
+    </div>
+
+    <!-- İstatistikler -->
+    <div class="grid grid-cols-3 gap-2 w-full mt-4 text-center">
+      <div class="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
+        <span class="text-[10px] uppercase text-slate-400 tracking-wider">Min</span>
+        <div id="statMin" class="font-mono font-bold text-slate-200 mt-0.5">--</div>
+      </div>
+      <div class="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
+        <span class="text-[10px] uppercase text-slate-400 tracking-wider">Ortalama</span>
+        <div id="statAvg" class="font-mono font-bold text-slate-200 mt-0.5">--</div>
+      </div>
+      <div class="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
+        <span class="text-[10px] uppercase text-slate-400 tracking-wider">Max (Tepe)</span>
+        <div id="statMax" class="font-mono font-bold text-slate-200 mt-0.5">--</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let audioContext, analyser, microphone, scriptNode;
+    let isListening = false;
+    let beeping = false;
+    let beepInterval = null;
+
+    let threshold = 75;
+    let offset = 0;
+    let gainMultiplier = 1.0;
+    let soundAlert = true;
+
+    let minDb = Infinity, maxDb = -Infinity, samples = [], maxSamples = 50;
+
+    // Elementler
+    const dbValue = document.getElementById('dbValue');
+    const gaugeRing = document.getElementById('gaugeRing');
+    const alarmBanner = document.getElementById('alarmBanner');
+    const btnToggle = document.getElementById('btnToggle');
+    const rangeThreshold = document.getElementById('rangeThreshold');
+    const thresholdVal = document.getElementById('thresholdVal');
+    const rangeOffset = document.getElementById('rangeOffset');
+    const offsetVal = document.getElementById('offsetVal');
+    const rangeGain = document.getElementById('rangeGain');
+    const gainVal = document.getElementById('gainVal');
+    const checkBeep = document.getElementById('checkBeep');
+    const statMin = document.getElementById('statMin');
+    const statAvg = document.getElementById('statAvg');
+    const statMax = document.getElementById('statMax');
+    const btnShare = document.getElementById('btnShare');
+
+    // LocalStorage yükle
+    if (localStorage.getItem('db_threshold')) {
+      threshold = parseFloat(localStorage.getItem('db_threshold'));
+      rangeThreshold.value = threshold;
+      thresholdVal.textContent = threshold + ' dB';
+    }
+    if (localStorage.getItem('db_offset')) {
+      offset = parseFloat(localStorage.getItem('db_offset'));
+      rangeOffset.value = offset;
+      offsetVal.textContent = (offset >= 0 ? '+' : '') + offset + ' dB';
+    }
+    if (localStorage.getItem('db_gain')) {
+      gainMultiplier = parseFloat(localStorage.getItem('db_gain'));
+      rangeGain.value = gainMultiplier;
+      gainVal.textContent = gainMultiplier.toFixed(1) + 'x';
+    }
+
+    rangeThreshold.oninput = (e) => {
+      threshold = parseFloat(e.target.value);
+      thresholdVal.textContent = threshold + ' dB';
+      localStorage.setItem('db_threshold', threshold);
+    };
+
+    rangeOffset.oninput = (e) => {
+      offset = parseFloat(e.target.value);
+      offsetVal.textContent = (offset >= 0 ? '+' : '') + offset + ' dB';
+      localStorage.setItem('db_offset', offset);
+    };
+
+    rangeGain.oninput = (e) => {
+      gainMultiplier = parseFloat(e.target.value);
+      gainVal.textContent = gainMultiplier.toFixed(1) + 'x';
+      localStorage.setItem('db_gain', gainMultiplier);
+    };
+
+    checkBeep.onchange = (e) => {
+      soundAlert = e.target.checked;
+    };
+
+    function playBeep() {
+      if (!soundAlert || !audioContext) return;
+      try {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880; // A5
+        gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start();
+        osc.stop(audioContext.currentTime + 0.15);
+      } catch (err) {}
+    }
+
+    async function startListening() {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioContext.state === 'suspended') await audioContext.resume();
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.3;
+
+        microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+
+        const buffer = new Float32Array(analyser.fftSize);
+
+        const updateMeter = () => {
+          if (!isListening) return;
+          analyser.getFloatTimeDomainData(buffer);
+
+          let sumSquares = 0.0;
+          for (let i = 0; i < buffer.length; i++) {
+            sumSquares += buffer[i] * buffer[i];
+          }
+          let rms = Math.sqrt(sumSquares / buffer.length);
+          
+          let rawDb = rms > 0.00001 ? 20 * Math.log10(rms) + 100 : 0;
+          let calibratedDb = Math.round((rawDb * gainMultiplier) + offset);
+          if (calibratedDb < 0) calibratedDb = 0;
+          if (calibratedDb > 130) calibratedDb = 130;
+
+          // İstatistikler
+          if (samples.length >= maxSamples) samples.shift();
+          samples.push(calibratedDb);
+          if (calibratedDb < minDb) minDb = calibratedDb;
+          if (calibratedDb > maxDb) maxDb = calibratedDb;
+          const avgDb = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+
+          dbValue.textContent = calibratedDb;
+          statMin.textContent = minDb === Infinity ? '--' : minDb + ' dB';
+          statAvg.textContent = avgDb + ' dB';
+          statMax.textContent = maxDb === -Infinity ? '--' : maxDb + ' dB';
+
+          // Eşik kontrolü
+          if (calibratedDb >= threshold) {
+            gaugeRing.className = 'absolute inset-0 rounded-full border-4 border-rose-500 alarm-active';
+            alarmBanner.classList.remove('hidden');
+            if (!beeping) {
+              beeping = true;
+              playBeep();
+              beepInterval = setInterval(playBeep, 400);
+            }
+          } else {
+            gaugeRing.className = 'absolute inset-0 rounded-full border-4 border-emerald-500 transition-all duration-150';
+            alarmBanner.classList.add('hidden');
+            if (beeping) {
+              beeping = false;
+              clearInterval(beepInterval);
+            }
+          }
+
+          requestAnimationFrame(updateMeter);
+        };
+
+        isListening = true;
+        btnToggle.textContent = 'Dinlemeyi Durdur';
+        btnToggle.className = 'w-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-rose-600/20 mb-6';
+        updateMeter();
+
+      } catch (err) {
+        alert('Mikrofon erişimi reddedildi veya hata oluştu: ' + err.message);
+      }
+    }
+
+    function stopListening() {
+      isListening = false;
+      if (beepInterval) clearInterval(beepInterval);
+      beeping = false;
+      if (audioContext) audioContext.close();
+      btnToggle.textContent = 'Dinlemeyi Başlat';
+      btnToggle.
