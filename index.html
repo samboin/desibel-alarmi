@@ -7,9 +7,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @keyframes pulse-ring {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.05); opacity: 0.4; }
-      100% { transform: scale(0.95); opacity: 0.8; }
+      0% { transform: scale(0.96); opacity: 0.9; }
+      50% { transform: scale(1.04); opacity: 0.4; }
+      100% { transform: scale(0.96); opacity: 0.9; }
     }
     .alarm-active {
       animation: pulse-ring 0.6s infinite ease-in-out;
@@ -22,18 +22,22 @@
   <header class="w-full max-w-md flex justify-between items-center py-4 border-b border-slate-800 mb-6">
     <div>
       <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-        <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="statusDot" class="w-3 h-3 rounded-full bg-slate-500"></span>
         Desibel Alarmı
       </h1>
       <p class="text-xs text-slate-400">Mikrofon Eşik & Kalibrasyon</p>
     </div>
-    <button id="btnShare" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+    <button id="btnShare" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition">
       Paylaş
     </button>
   </header>
 
+  <!-- Hata Bildirim Kutusu -->
+  <div id="errorBanner" class="hidden w-full max-w-md bg-amber-500/20 border border-amber-500/50 text-amber-300 p-3 rounded-xl mb-4 text-xs font-mono break-words">
+  </div>
+
   <!-- Alarm Uyarısı Banner -->
-  <div id="alarmBanner" class="hidden w-full max-w-md bg-rose-600/90 text-white p-3 rounded-xl mb-4 text-center font-bold tracking-wide shadow-lg shadow-rose-950/50 animate-bounce">
+  <div id="alarmBanner" class="hidden w-full max-w-md bg-rose-600 text-white p-3 rounded-xl mb-4 text-center font-bold tracking-wide shadow-lg shadow-rose-950/50 animate-bounce">
     EŞİK DEĞERİ AŞILDI!
   </div>
 
@@ -51,7 +55,7 @@
     </div>
 
     <!-- Başlat / Durdur -->
-    <button id="btnToggle" class="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-emerald-500/20 mb-6">
+    <button id="btnToggle" class="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-emerald-500/20 mb-6 cursor-pointer">
       Dinlemeyi Başlat
     </button>
 
@@ -107,7 +111,7 @@
         <div id="statAvg" class="font-mono font-bold text-slate-200 mt-0.5">--</div>
       </div>
       <div class="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
-        <span class="text-[10px] uppercase text-slate-400 tracking-wider">Max (Tepe)</span>
+        <span class="text-[10px] uppercase text-slate-400 tracking-wider">Max</span>
         <div id="statMax" class="font-mono font-bold text-slate-200 mt-0.5">--</div>
       </div>
     </div>
@@ -115,7 +119,10 @@
   </main>
 
   <script>
-    let audioContext, analyser, microphone, scriptNode;
+    let audioContext = null;
+    let analyser = null;
+    let microphoneStream = null;
+    let animationFrameId = null;
     let isListening = false;
     let beeping = false;
     let beepInterval = null;
@@ -125,12 +132,14 @@
     let gainMultiplier = 1.0;
     let soundAlert = true;
 
-    let minDb = Infinity, maxDb = -Infinity, samples = [], maxSamples = 50;
+    let minDb = Infinity, maxDb = -Infinity, samples = [];
+    const maxSamples = 40;
 
-    // Elementler
     const dbValue = document.getElementById('dbValue');
     const gaugeRing = document.getElementById('gaugeRing');
+    const statusDot = document.getElementById('statusDot');
     const alarmBanner = document.getElementById('alarmBanner');
+    const errorBanner = document.getElementById('errorBanner');
     const btnToggle = document.getElementById('btnToggle');
     const rangeThreshold = document.getElementById('rangeThreshold');
     const thresholdVal = document.getElementById('thresholdVal');
@@ -144,44 +153,44 @@
     const statMax = document.getElementById('statMax');
     const btnShare = document.getElementById('btnShare');
 
-    // LocalStorage yükle
-    if (localStorage.getItem('db_threshold')) {
-      threshold = parseFloat(localStorage.getItem('db_threshold'));
-      rangeThreshold.value = threshold;
-      thresholdVal.textContent = threshold + ' dB';
-    }
-    if (localStorage.getItem('db_offset')) {
-      offset = parseFloat(localStorage.getItem('db_offset'));
-      rangeOffset.value = offset;
-      offsetVal.textContent = (offset >= 0 ? '+' : '') + offset + ' dB';
-    }
-    if (localStorage.getItem('db_gain')) {
-      gainMultiplier = parseFloat(localStorage.getItem('db_gain'));
-      rangeGain.value = gainMultiplier;
-      gainVal.textContent = gainMultiplier.toFixed(1) + 'x';
-    }
+    // LocalStorage
+    try {
+      if (localStorage.getItem('db_threshold')) {
+        threshold = parseFloat(localStorage.getItem('db_threshold'));
+        rangeThreshold.value = threshold;
+        thresholdVal.textContent = threshold + ' dB';
+      }
+      if (localStorage.getItem('db_offset')) {
+        offset = parseFloat(localStorage.getItem('db_offset'));
+        rangeOffset.value = offset;
+        offsetVal.textContent = (offset >= 0 ? '+' : '') + offset + ' dB';
+      }
+      if (localStorage.getItem('db_gain')) {
+        gainMultiplier = parseFloat(localStorage.getItem('db_gain'));
+        rangeGain.value = gainMultiplier;
+        gainVal.textContent = gainMultiplier.toFixed(1) + 'x';
+      }
+    } catch (e) {}
 
     rangeThreshold.oninput = (e) => {
       threshold = parseFloat(e.target.value);
       thresholdVal.textContent = threshold + ' dB';
-      localStorage.setItem('db_threshold', threshold);
+      try { localStorage.setItem('db_threshold', threshold); } catch (e) {}
     };
 
     rangeOffset.oninput = (e) => {
       offset = parseFloat(e.target.value);
       offsetVal.textContent = (offset >= 0 ? '+' : '') + offset + ' dB';
-      localStorage.setItem('db_offset', offset);
+      try { localStorage.setItem('db_offset', offset); } catch (e) {}
     };
 
     rangeGain.oninput = (e) => {
       gainMultiplier = parseFloat(e.target.value);
       gainVal.textContent = gainMultiplier.toFixed(1) + 'x';
-      localStorage.setItem('db_gain', gainMultiplier);
+      try { localStorage.setItem('db_gain', gainMultiplier); } catch (e) {}
     };
 
-    checkBeep.onchange = (e) => {
-      soundAlert = e.target.checked;
-    };
+    checkBeep.onchange = (e) => { soundAlert = e.target.checked; };
 
     function playBeep() {
       if (!soundAlert || !audioContext) return;
@@ -189,45 +198,67 @@
         const osc = audioContext.createOscillator();
         const gain = audioContext.createGain();
         osc.type = 'sine';
-        osc.frequency.value = 880; // A5
+        osc.frequency.setValueAtTime(880, audioContext.currentTime);
         gain.gain.setValueAtTime(0.2, audioContext.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.15);
         osc.connect(gain);
         gain.connect(audioContext.destination);
         osc.start();
         osc.stop(audioContext.currentTime + 0.15);
-      } catch (err) {}
+      } catch (e) {}
     }
 
     async function startListening() {
-      try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioContext.state === 'suspended') await audioContext.resume();
+      errorBanner.classList.add('hidden');
+      errorBanner.textContent = '';
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError('Tarayıcınız mikrofon erişimini (getUserMedia) desteklemiyor veya sayfa HTTPS üzerinde değil.');
+        return;
+      }
+
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!audioContext || audioContext.state === 'closed') {
+          audioContext = new AudioCtx();
+        }
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+
+        microphoneStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
+
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.3;
+        analyser.smoothingTimeConstant = 0.2;
 
-        microphone = audioContext.createMediaStreamSource(stream);
-        microphone.connect(analyser);
+        const micSource = audioContext.createMediaStreamSource(microphoneStream);
+        micSource.connect(analyser);
 
-        const buffer = new Float32Array(analyser.fftSize);
+        const dataArray = new Float32Array(analyser.fftSize);
 
-        const updateMeter = () => {
+        const tick = () => {
           if (!isListening) return;
-          analyser.getFloatTimeDomainData(buffer);
+
+          analyser.getFloatTimeDomainData(dataArray);
 
           let sumSquares = 0.0;
-          for (let i = 0; i < buffer.length; i++) {
-            sumSquares += buffer[i] * buffer[i];
+          for (let i = 0; i < dataArray.length; i++) {
+            sumSquares += dataArray[i] * dataArray[i];
           }
-          let rms = Math.sqrt(sumSquares / buffer.length);
-          
-          let rawDb = rms > 0.00001 ? 20 * Math.log10(rms) + 100 : 0;
+          let rms = Math.sqrt(sumSquares / dataArray.length);
+
+          // dB SPL yaklaşık formülü
+          let rawDb = rms > 0.000001 ? 20 * Math.log10(rms) + 100 : 0;
           let calibratedDb = Math.round((rawDb * gainMultiplier) + offset);
           if (calibratedDb < 0) calibratedDb = 0;
-          if (calibratedDb > 130) calibratedDb = 130;
+          if (calibratedDb > 140) calibratedDb = 140;
 
           // İstatistikler
           if (samples.length >= maxSamples) samples.shift();
@@ -241,14 +272,14 @@
           statAvg.textContent = avgDb + ' dB';
           statMax.textContent = maxDb === -Infinity ? '--' : maxDb + ' dB';
 
-          // Eşik kontrolü
+          // Alarm kontrolü
           if (calibratedDb >= threshold) {
             gaugeRing.className = 'absolute inset-0 rounded-full border-4 border-rose-500 alarm-active';
             alarmBanner.classList.remove('hidden');
             if (!beeping) {
               beeping = true;
               playBeep();
-              beepInterval = setInterval(playBeep, 400);
+              beepInterval = setInterval(playBeep, 450);
             }
           } else {
             gaugeRing.className = 'absolute inset-0 rounded-full border-4 border-emerald-500 transition-all duration-150';
@@ -259,23 +290,75 @@
             }
           }
 
-          requestAnimationFrame(updateMeter);
+          animationFrameId = requestAnimationFrame(tick);
         };
 
         isListening = true;
+        statusDot.className = 'w-3 h-3 rounded-full bg-emerald-500 animate-pulse';
         btnToggle.textContent = 'Dinlemeyi Durdur';
-        btnToggle.className = 'w-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-rose-600/20 mb-6';
-        updateMeter();
+        btnToggle.className = 'w-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-rose-600/20 mb-6 cursor-pointer';
+
+        tick();
 
       } catch (err) {
-        alert('Mikrofon erişimi reddedildi veya hata oluştu: ' + err.message);
+        showError('Hata: ' + (err.message || err.name || 'Mikrofon başlatılamadı.'));
+        stopListening();
       }
     }
 
     function stopListening() {
       isListening = false;
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       if (beepInterval) clearInterval(beepInterval);
       beeping = false;
-      if (audioContext) audioContext.close();
+
+      if (microphoneStream) {
+        microphoneStream.getTracks().forEach(track => track.stop());
+        microphoneStream = null;
+      }
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close();
+      }
+
+      statusDot.className = 'w-3 h-3 rounded-full bg-slate-500';
       btnToggle.textContent = 'Dinlemeyi Başlat';
-      btnToggle.
+      btnToggle.className = 'w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold py-3.5 px-6 rounded-xl transition duration-150 shadow-lg shadow-emerald-500/20 mb-6 cursor-pointer';
+      dbValue.textContent = '--';
+      alarmBanner.classList.add('hidden');
+      gaugeRing.className = 'absolute inset-0 rounded-full border-4 border-emerald-500';
+    }
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.classList.remove('hidden');
+    }
+
+    btnToggle.addEventListener('click', () => {
+      if (isListening) {
+        stopListening();
+      } else {
+        startListening();
+      }
+    });
+
+    btnShare.addEventListener('click', async () => {
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Desibel Alarmı',
+            text: 'Mikrofon ses eşiği ve kalibrasyon alarmı',
+            url: window.location.href,
+          });
+        } catch (e) {}
+      } else {
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          alert('Bağlantı panoya kopyalandı!');
+        } catch (e) {
+          prompt('Sayfa adresi:', window.location.href);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
